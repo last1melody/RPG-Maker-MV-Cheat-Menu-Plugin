@@ -1781,3 +1781,397 @@ DataManager.saveGame = function(savefileId) {
 
 	return DataManager.default_saveGame(savefileId);
 };
+
+/////////////////////////////////////////////////
+// 	Extra features
+/////////////////////////////////////////////////
+
+// Create a sprite to highlight events
+function EventHighlightSprite() {
+    this.initialize.apply(this, arguments);
+}
+
+EventHighlightSprite.prototype = Object.create(Sprite.prototype);
+EventHighlightSprite.prototype.constructor = EventHighlightSprite;
+
+EventHighlightSprite.prototype.initialize = function(event) {
+    Sprite.prototype.initialize.call(this);
+    this._event = event;
+    this.bitmap = new Bitmap(24, 24); // Small square for the "!"
+    this.bitmap.drawText("!", 0, 0, 24, 24, "center"); // Draw the "!"
+    this.anchor.x = 0.5; // Center horizontally
+    this.anchor.y = 1; // Anchor at the bottom (so it sits above the event)
+    this.z = 9; // Ensure it appears above most sprites
+};
+
+EventHighlightSprite.prototype.update = function() {
+    Sprite.prototype.update.call(this);
+    if (this._event) {
+        this.x = this._event.screenX(); // Match the event’s x-position
+        this.y = this._event.screenY() - 24; // Place it above the event
+    }
+};
+
+// Alias Scene_Map.prototype.createSpriteset to add highlights
+var _Scene_Map_createSpriteset = Scene_Map.prototype.createSpriteset;
+Scene_Map.prototype.createSpriteset = function() {
+    _Scene_Map_createSpriteset.call(this);
+    this._eventHighlights = []; // Array to store highlight sprites
+    if (Cheat_Menu.showEventHighlights) {
+        this.addEventHighlights(); // Add highlights if enabled
+    }
+};
+
+// Function to add highlights to all active events
+Scene_Map.prototype.addEventHighlights = function() {
+    var events = $gameMap.events(); // Get all events on the map
+    for (var i = 0; i < events.length; i++) {
+        var event = events[i];
+        if (event && event._pageIndex >= 0) { // Check if the event is active
+            var highlight = new EventHighlightSprite(event);
+            this._spriteset._tilemap.addChild(highlight); // Add to the map
+            this._eventHighlights.push(highlight);
+        }
+    }
+};
+
+// Function to remove all event highlights
+Scene_Map.prototype.removeEventHighlights = function() {
+    for (var i = 0; i < this._eventHighlights.length; i++) {
+        this._spriteset._tilemap.removeChild(this._eventHighlights[i]);
+    }
+    this._eventHighlights = []; // Clear the array
+};
+
+// Alias Scene_Map.prototype.update to handle toggling
+var _Scene_Map_update = Scene_Map.prototype.update;
+Scene_Map.prototype.update = function() {
+    _Scene_Map_update.call(this);
+    if (Cheat_Menu.showEventHighlights && this._eventHighlights.length === 0) {
+        this.addEventHighlights(); // Add highlights if toggled on
+    } else if (!Cheat_Menu.showEventHighlights && this._eventHighlights.length > 0) {
+        this.removeEventHighlights(); // Remove highlights if toggled off
+    }
+};
+
+// Add a new menu option for toggling event highlights
+Cheat_Menu.menus.splice(0, 0, function() {
+    Cheat_Menu.append_cheat_title("Event Highlights");
+    var statusText = Cheat_Menu.showEventHighlights ? "<font color='#00ff00'>On</font>" : "<font color='#ff0000'>Off</font>";
+    Cheat_Menu.append_cheat("Show Highlights", statusText, 4, Cheat_Menu.toggleEventHighlights);
+});
+
+// Handler for toggling event highlights
+Cheat_Menu.toggleEventHighlights = function() {
+    Cheat_Menu.showEventHighlights = !Cheat_Menu.showEventHighlights;
+    SoundManager.playSystemSound(Cheat_Menu.showEventHighlights ? 1 : 2); // Play sound effect
+    Cheat_Menu.update_menu(); // Refresh the menu display
+};
+
+// Initialize the toggle variable
+/// Insert at the top of the menu list
+
+// --- Global Variables for Persistence and Locking ---
+let lockedEventId = null;  // Store the ID of the locked event.  Null = no lock.
+let recordedVars = [];    // Store recorded variables.  Persistent across menu calls.
+let recordMode = false;   // Track if we're in record mode
+let resultLogs = [];      // Store the result logs
+
+Cheat_Menu.menus.splice(0, 0, function() {
+    // Add the menu title
+    Cheat_Menu.append_cheat_title("Event Debugger");
+
+    // Helper function to get the currently active event
+    function getActiveEvent() {
+        if ($gameMap && $gameMap._interpreter && $gameMap._interpreter.isRunning()) {
+            return $gameMap.event($gameMap._interpreter._eventId);
+        }
+        return null;
+    }
+
+    // Function to get either active or locked event, prioritizing the locked one.
+    function getTargetEvent() {
+        if (lockedEventId !== null) {
+            let lockedEvent = $gameMap.event(lockedEventId);
+            if (lockedEvent) {
+                return lockedEvent;
+            } else {
+                // Clear the lock if the event no longer exists.
+                lockedEventId = null;
+                console.warn("Locked event ID", lockedEventId, "no longer exists. Lock released.");
+            }
+        }
+        return getActiveEvent(); // Fallback to the currently running event.
+    }
+
+
+    // --- Helper Functions ---
+	// Function to append a message to the result logs and update the menu
+	function appendToResultLog(message) {
+		resultLogs.push(message);
+		//Cheat_Menu.refresh(); // Refresh the menu to show the updated logs
+	}
+
+    function logEventCommand(command, indent = "") {
+        let logStr = indent + "Code: " + command.code;
+        if (command.parameters && command.parameters.length > 0) {
+            logStr += ", Params: " + JSON.stringify(command.parameters);
+        }
+        appendToResultLog(logStr);
+        // Consider additional details for common commands:
+        switch (command.code) {
+            case 101: // Show Text
+				appendToResultLog(indent + "  Text: " + command.parameters[0]);
+                break;
+            case 102: // Show Choices
+				appendToResultLog(indent + "  Choices: " + command.parameters[0].join(", "));
+                break;
+            case 111: // Conditional Branch
+				appendToResultLog(indent + "  Condition Type: " + command.parameters[0]);
+                if (command.parameters[0] === 0) { // Variable check
+                     // Check for common comparison operators
+                     let op = [' ==', ' >=', ' <=', ' >', ' <', ' !='][command.parameters[2]] || 'Unknown Comparison';
+
+                     appendToResultLog(indent + "  Var Condition: Variable " + command.parameters[1] + op + command.parameters[3]);
+
+                 } else if (command.parameters[0] === 12) { // Script
+					appendToResultLog(indent + "  Script Condition: " + command.parameters[1] );
+                 }
+                break;
+            case 122: // Control Variables
+				appendToResultLog(indent + `  Control Variables: Var(s) ${command.parameters[0]} to ${command.parameters[1]} =  Operation ${command.parameters[2]} with ${command.parameters[3]}`);
+                break;
+                case 201: //Transfer Player
+                appendToResultLog(indent + `  Transfer Player`);
+                break;
+                case 205: //Set Move Route
+                appendToResultLog(indent + ` Set Move Route`);
+                break;
+            case 301: // Input Number
+				appendToResultLog(indent + "  Input Number: Variable ID " + command.parameters[0] + ", Digits: " + command.parameters[1]);
+                break;
+              case 355: // Script
+              case 655: //Script continued
+			  	appendToResultLog(indent + " Script Call:" + command.parameters[0]);
+                break;
+        }
+    }
+
+    function logEventPage(page, pageIndex) {
+        appendToResultLog("Event Page: " + (pageIndex + 1));
+        if(page.conditions){
+            appendToResultLog("Page Conditions:" + JSON.stringify(page.conditions,null,2))
+        }
+
+        if (page.list && page.list.length > 0) {
+            page.list.forEach(function(command, index) {
+                logEventCommand(command, "  ");
+            });
+        } else {
+            appendToResultLog("  (Empty Page)");
+        }
+    }
+
+    // Function to find references to a variable within an event's commands.
+     function findVariableReferences(event, varId) {
+        let references = [];
+        if (!event || !event.event() || !event.event().pages) return references;
+
+        event.event().pages.forEach((page, pageIndex) => {
+            page.list.forEach((command, commandIndex) => {
+                if (command.parameters) {
+                    // Check for Control Variables (code 122) and Input Number (code 301)
+                    if (command.code === 122 && (command.parameters[0] <= varId && varId <= command.parameters[1])) {
+                         references.push({page: pageIndex + 1, commandIndex: commandIndex, type: "Control Variables", command: command});
+                    } else if (command.code === 301 && command.parameters[0] === varId) {
+                        references.push({page: pageIndex + 1, commandIndex: commandIndex, type: "Input Number", command: command});
+                    } else if (command.code === 111 && command.parameters[0] === 0 && command.parameters[1] === varId ) { //Conditional Branch
+                        references.push({page: pageIndex + 1, commandIndex: commandIndex, type: "Conditional Branch", command: command});
+                    }
+              // Check for usage within script calls (code 355 and 655)
+                    else if((command.code === 355 || command.code === 655) && command.parameters.length >0 && typeof command.parameters[0] === "string") {
+
+                        if(command.parameters[0].includes(`$gameVariables.value(${varId})`) || command.parameters[0].includes(`$gameVariables._data[${varId}]`)){
+                            references.push({page: pageIndex + 1, commandIndex: commandIndex, type: "Script Call (Read)", command: command});
+                        }
+                        //Check for set Value
+                        if(command.parameters[0].includes(`$gameVariables.setValue(${varId},`)){
+                            references.push({page: pageIndex + 1, commandIndex: commandIndex, type: "Script Call (Write)", command: command});
+                        }
+                    }
+                }
+            });
+        });
+
+        return references;
+    }
+
+
+
+    // --- Menu Construction ---
+    let targetEvent = getTargetEvent();
+
+    if (targetEvent) {
+        let eventName = targetEvent.event().name || "Event " + targetEvent._eventId;
+        Cheat_Menu.append_description("Target Event: " + eventName + (lockedEventId !== null ? " (LOCKED)" : ""));
+
+        // --- Lock/Unlock Event ---
+        Cheat_Menu.append_cheat("Lock/Unlock Event", "Activate", "L", function() {
+            if (lockedEventId === targetEvent._eventId) {
+                lockedEventId = null; // Unlock
+                appendToResultLog("Event lock released.");
+            } else {
+                lockedEventId = targetEvent._eventId; // Lock current event
+                appendToResultLog("Event " + targetEvent._eventId + " locked.");
+            }
+            // Refresh the menu to reflect lock state
+            //Cheat_Menu.update_menu();
+
+        });
+
+
+
+        // --- Record/Stop Recording Variables ---
+        Cheat_Menu.append_cheat("Toggle Record Variables", "Activate", "R", function() {
+           recordMode = !recordMode;
+            if(recordMode){
+                recordedVars = $gameVariables._data.slice();
+                 Cheat_Menu.append_description("Variable recording started.");
+            } else {
+                Cheat_Menu.append_description("Variable recording stopped.");
+            }
+            //Cheat_Menu.update_menu();
+        });
+
+        // --- Check Changed Variables ---
+        Cheat_Menu.append_cheat("Check Changed Variables", "Activate", "C", function() {
+            if (!recordMode && recordedVars.length >0) {
+                let changedVars = [];
+                for (let i = 1; i < recordedVars.length; i++) {  // Start from 1 to skip common event variables.
+                    if (recordedVars[i] !== $gameVariables._data[i]) {
+
+                        //Find who changed it
+                        let references = findVariableReferences(targetEvent, i);
+                        let refStr = "";
+
+                        if(references.length > 0) {
+                            references.forEach(ref=>{
+                                refStr+= `(Page ${ref.page}, Cmd ${ref.commandIndex}, Type: ${ref.type})`;
+                            });
+                        } else {
+                            refStr = "No direct references found in this event.";
+                        }
+
+                        changedVars.push(`Var ${i}: ${recordedVars[i]} -> ${$gameVariables._data[i]}. ${refStr}`);
+                    }
+                }
+                if (changedVars.length > 0) {
+                    appendToResultLog("Changed Variables (Since last record/start):");
+                    changedVars.forEach(function(change) {
+                        appendToResultLog("  - " + change);
+                    });
+                } else {
+                    appendToResultLog("No variables changed (Since last record/start).");
+                }
+            } else if (recordMode) {
+
+                appendToResultLog("Stop recording to compare.");
+
+            }
+             else {
+                appendToResultLog("No variables recorded.  Start recording first.");
+            }
+        });
+
+
+        // --- Inspect Event Commands ---
+                // Inspect Event Conditions and Commands
+        Cheat_Menu.append_cheat("Inspect Event Pages", "Activate", "I", function() {
+            let eventData = targetEvent.event();
+            if (eventData && eventData.pages) {
+                eventData.pages.forEach(function(page, index) {
+                    logEventPage(page, index);
+                });
+            } else {
+                appendToResultLog("No event pages found.");
+            }
+        });
+
+        // --- Find Variable References ---
+        Cheat_Menu.append_cheat("Find Variable References", "Enter Variable ID", "V", function(varIdStr) {
+             let varId = parseInt(varIdStr);
+              if (isNaN(varId)) {
+					appendToResultLog("Invalid variable ID.");
+                 return;
+             }
+
+            let references = findVariableReferences(targetEvent, varId);
+
+             if (references.length > 0) {
+				appendToResultLog("References to Variable " + varId + ":");
+                    references.forEach(ref => {
+                        appendToResultLog(`- Page ${ref.page}, Command ${ref.commandIndex}, Type: ${ref.type}`);
+
+                        // Display relevant information based on the command type
+
+                        logEventCommand(ref.command, "  ");
+                    });
+                } else {
+					appendToResultLog("No references to Variable " + varId + " found in this event.");
+             }
+        });
+
+
+        // --- Step Through Event (Basic) ---
+        Cheat_Menu.append_cheat("Step Through Event (Basic)", "Activate", "S", function() {
+            if ($gameMap._interpreter.isRunning() && $gameMap._interpreter._list) {
+                let currentCommandIndex = $gameMap._interpreter._index;
+                let currentCommand = $gameMap._interpreter._list[currentCommandIndex];
+
+                appendToResultLog(`Current Command Index: ${currentCommandIndex}`);
+                logEventCommand(currentCommand);
+
+                // Advance to the next command, skipping comments and labels
+                let nextIndex = currentCommandIndex + 1;
+                while (nextIndex < $gameMap._interpreter._list.length) {
+                    let nextCommand = $gameMap._interpreter._list[nextIndex];
+                    if (nextCommand.code !== 0 && nextCommand.code !== 118) { // 0 = empty, 118 = label
+                        break;
+                    }
+                    nextIndex++;
+                }
+
+                if (nextIndex < $gameMap._interpreter._list.length) {
+                     $gameMap._interpreter._index = nextIndex;
+					appendToResultLog(`Next Command Index: ${nextIndex}`);
+                } else{
+					appendToResultLog(`End of Event`);
+                }
+            } else {
+                appendToResultLog("Event interpreter not running or no command list.");
+            }
+              //Cheat_Menu.update_menu(); //Keep Open
+        });
+
+
+    } else {
+        Cheat_Menu.append_description("No active or locked event found.");
+        // Clear the lock if there's no active event (e.g., event ended)
+        if (lockedEventId !== null) {
+            appendToResultLog("Clearing event lock (no active event).");
+             lockedEventId = null;
+
+        }
+
+    }
+
+	// --- Clear Result Logs ---
+	Cheat_Menu.append_cheat("Clear Result Logs", "Activate", "X", function() {
+		resultLogs = [];
+	});
+
+	resultLogs.forEach(log => {
+        Cheat_Menu.append_description(log);
+    });
+});
+
