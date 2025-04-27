@@ -1,7 +1,8 @@
 RPG Maker MV Cheat Menu Plugin
 ==============================
 
-I've created a plugin for RPG Maker MV that allows users to access a Cheat Menu in game. The controls are all input via the number keys \[0\]\-\[9\] (not the NUMPAD) (other keys may be used as well now) or the mouse.
+This is the forked version of https://github.com/emerladCoder/RPG-Maker-MV-Cheat-Menu-Plugin. The difference in this version is the addition of event-related functionality.
+The controls are all input via the number keys \[0\]\-\[9\] (not the NUMPAD) (other keys may be used as well now) or the mouse.
 
 Open the Menu by pressing the \[1\] Key.  
 Move menu to different positions with \` (key with tilde ~)  
@@ -31,13 +32,15 @@ Available Cheats Are
   * With this you can edit game Variables and Switches (at your own risk) in the $gameVariables and $gameSwitches, as well as other advanced stuff
 * Open Switch/Variable Debug Menu from playtest Mode with F9
   * Better/easier method for editing the Switches and Variables than using the console, slower if you want to edit variables by large amounts
- 
+* Review what's in the event and step through it
+* Highlight all events, e.g. show hidden events
+
 Downloads
 ---------
 
 Download or Clone from above repository link or click the link below
 
-Download: [GitHub](https://github.com/emerladCoder/RPG-Maker-MV-Cheat-Menu-Plugin/archive/master.zip)
+Download: [GitHub](https://github.com/last1melody/RPG-Maker-MV-Cheat-Menu-Plugin/archive/master.zip)
 
 I've tested this to work with Cursed Armor and 魔王イリスの逆襲[RJ176175] (both are NSFW)
 
@@ -46,7 +49,7 @@ Install
 -------
 
 * Unpack Game if needed (if you have a single large Game.exe with no /www folder, etc.).
-  * I used to use EnigmaVBUnpacker tool by [Kao](https://lifeinhex.com/) (most new games do not require this anymore)
+  * You can use EnigmaVBUnpacker tool by [Kao](https://lifeinhex.com/) (most new games do not require this anymore)
 * Copy and Paste this contents of Cheat_Menu folder into folder with Game.exe
 * Patch your www/js/plugins.js  
   * Backup your www/js/plugins.js file
